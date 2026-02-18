@@ -54,7 +54,7 @@ def run_hdbscan(
     x_col: str = 'x',
     y_col: str = 'y',
     t_col: str = 't',
-    time_scale: float = 1e-3,
+    time_scale: float = 1e3,
     min_cluster_size: int = 10,
     min_samples: int = None,
     cluster_selection_epsilon: float = 0.0,
@@ -91,6 +91,7 @@ def run_hdbscan(
             "hdbscan is not installed. Install it with: pip install hdbscan"
         )
 
+    print(f"Starting HDBSCAN clustering on {len(df):,} events...")
     features = build_feature_matrix(df, x_col, y_col, t_col, time_scale)
 
     clusterer = hdbscan.HDBSCAN(
@@ -147,6 +148,7 @@ def run_hdbscan_gpu(
             "cuML is not installed. Install RAPIDS: https://rapids.ai/start.html"
         )
 
+    print(f"Starting GPU HDBSCAN clustering (cuML) on {len(df):,} events...")
     features = build_feature_matrix(df, x_col, y_col, t_col, time_scale)
     features_gpu = cp.asarray(features)
 
@@ -265,7 +267,7 @@ if __name__ == "__main__":
     from extract import extract,save_df
 
     df = extract('data/val_day_014_td.h5')
-    clustered = cluster_events(df, time_scale=10000, min_cluster_size=50)
+    clustered = cluster_events(df, time_scale=10000, min_cluster_size=50,use_gpu=True)
 
     save_df(clustered, 'data/val_day_014_td_clustered.parquet')
 

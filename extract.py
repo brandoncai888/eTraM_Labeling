@@ -90,6 +90,29 @@ SAVE_FUNCS = {
 }
 
 
+def save_df(df: pd.DataFrame, output_path: str, h5_key: str = 'data') -> None:
+    """
+    Save a DataFrame to `output_path` using the writer chosen by file extension.
+
+    Args:
+        df:          DataFrame to save.
+        output_path: Path including filename and extension (.h5, .npy, .csv, .parquet, .feather).
+        h5_key:      For HDF5 output, the group name to write (default 'data').
+
+    Raises:
+        ValueError: If the extension is not supported.
+    """
+    ext = Path(output_path).suffix.lower()
+    if ext not in SAVE_FUNCS:
+        supported = ", ".join(sorted(SAVE_FUNCS.keys()))
+        raise ValueError(f"Unsupported output format: {ext}\nSupported: {supported}")
+
+    if ext == '.h5':
+        SAVE_FUNCS[ext](df, output_path, key=h5_key)
+    else:
+        SAVE_FUNCS[ext](df, output_path)
+
+
 def extract(input_path, h5_key=None, use_cudf=False):
     """
     Load any supported file and return a DataFrame.

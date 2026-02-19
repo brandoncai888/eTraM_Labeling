@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import time
 
 try:
     from sklearn.cluster import MeanShift
@@ -184,6 +185,7 @@ def _ms_iterate_gpu(
     modes = seeds_gpu.copy()
 
     for it in range(max_iter):
+        t0 = time.time()
         new_modes = cp.empty_like(modes)
 
         for s in range(0, n_seeds, seed_batch_size):
@@ -198,11 +200,20 @@ def _ms_iterate_gpu(
             w_sum = weights.sum(axis=1, keepdims=True)    # (B, 1)
             new_modes[s:s + seed_batch_size] = cp.dot(weights, features_gpu) / w_sum
 
+        # Ensure kernels finished before measuring elapsed time
+        try:
+            cp.cuda.Stream.null.synchronize()
+        except Exception:
+            pass
+        iter_time = time.time() - t0
+
         max_shift = float(cp.max(cp.sqrt(cp.sum((new_modes - modes) ** 2, axis=1))))
         modes = new_modes
 
+        print(f"  Iter {it+1}: max_shift={max_shift:.6f}, time={iter_time:.3f}s")
+
         if max_shift < convergence_tol:
-            print(f"  Converged after {it + 1} iterations (max shift {max_shift:.6f})")
+            print(f"  Converged after {it + 1} iterations (max shift {max_shift:.6f}, last_iter_time={iter_time:.3f}s)")
             break
     else:
         print(f"  Reached max_iter={max_iter} (max shift {max_shift:.6f})")
@@ -488,10 +499,10 @@ if __name__ == "__main__":
         spatial_threshold=2_000.0,   # µs per pixel equivalent
         use_gpu=True,                 # set False to use CPU sklearn
         min_bin_freq=10,               # skip sparse bins → fewer seeds → faster
-        max_iter=100,
-        seed_batch_size=30,           # reduce if GPU OOM during iteration
-        point_batch_size=40_000,     # reduce if GPU OOM during label assignment
-        bandwidth=50.0,
+        max_iter=10,
+        seed_batch_size=22,           # reduce if GPU OOM during iteration
+        point_batch_size=12_000,     # reduce if GPU OOM during label assignment
+        bandwidth=300.0,
     )
 
     save_df(clustered, 'data/val_day_014_td_meanshift.parquet')

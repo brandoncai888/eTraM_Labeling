@@ -121,6 +121,8 @@ def run_hdbscan_gpu(
     label_col: str = 'cluster',
     chunk_size: int = None,
     overlap: int = None,
+    min_overlap_frac: float = 0.0,
+    max_centroid_dist: float = float('inf'),
 ) -> pd.DataFrame:
     """
     GPU-accelerated HDBSCAN using cuML (requires RAPIDS).
@@ -177,7 +179,10 @@ def run_hdbscan_gpu(
 
     if chunk_size is not None:
         ov = overlap if overlap is not None else chunk_size // 5
-        return _run_chunked(df, _gpu_chunk, chunk_size, ov, label_col, 'GPU HDBSCAN')
+        return _run_chunked(df, _gpu_chunk, chunk_size, ov, label_col, 'GPU HDBSCAN',
+                            x_col=x_col, y_col=y_col,
+                            min_overlap_frac=min_overlap_frac,
+                            max_centroid_dist=max_centroid_dist)
 
     print(f"[GPU] HDBSCAN on {len(df):,} events "
           f"(spatial_threshold={spatial_threshold}, "
@@ -215,6 +220,8 @@ def cluster_events_hdbscan(
     use_gpu: bool = False,
     chunk_size: int = None,
     overlap: int = None,
+    min_overlap_frac: float = 0.0,
+    max_centroid_dist: float = float('inf'),
 ) -> pd.DataFrame:
     """
     Cluster event camera data with HDBSCAN.
@@ -258,12 +265,22 @@ def cluster_events_hdbscan(
         overlap:                    (GPU only) Events shared between adjacent
                                     windows for cluster stitching.
                                     Default: chunk_size // 5.
+        min_overlap_frac:           (GPU chunked only) Only merge two clusters
+                                    across a chunk boundary if their co-occurring
+                                    overlap events are at least this fraction of
+                                    the smaller cluster's overlap presence.
+                                    Prevents a single bridge point from merging
+                                    two large separate clusters.  0.0 = off.
+        max_centroid_dist:          (GPU chunked only) Only merge two clusters
+                                    if their centroids in the overlap region are
+                                    within this many pixels of each other.
+                                    inf = off.
 
     Returns:
         Copy of df with integer label_col.  Noise = -1.
 
     Examples:
-        # GPU, large dataset
+        # GPU, large dataset, with merge guards
         clustered = cluster_events_hdbscan(
             df,
             spatial_threshold=5_000,
@@ -272,6 +289,8 @@ def cluster_events_hdbscan(
             use_gpu=True,
             chunk_size=300_000,
             overlap=25_000,
+            min_overlap_frac=0.3,
+            max_centroid_dist=15.0,
         )
 
         # CPU
@@ -292,6 +311,8 @@ def cluster_events_hdbscan(
         label_col=label_col,
         chunk_size=chunk_size,
         overlap=overlap,
+        min_overlap_frac=min_overlap_frac,
+        max_centroid_dist=max_centroid_dist,
     )
     cpu_kwargs = dict(
         df=df,
@@ -367,19 +388,23 @@ if __name__ == "__main__":
     df = extract('data/val_day_014_td.parquet')
     print(f"Loaded {len(df):,} events, columns: {list(df.columns)}")
 
+
     clustered = cluster_events_hdbscan(
         df,
         spatial_threshold=2_000.0,          # 5000 µs ≡ 1 pixel
-        min_cluster_size=10,                 # reject clusters < 10 events
-        min_samples=15,                      # stricter noise rejection
+        min_cluster_size=50,                 # reject clusters < 200 events
+        min_samples=20,                      # stricter noise rejection
         cluster_selection_epsilon=2.0,       # merge fragments within 2 px
         cluster_selection_method='eom',
         use_gpu=True,
         chunk_size=100_000,                  # fit in GPU memory
-        overlap=20_000,                      # stitch clusters across windows
+        overlap=10_000,                      # stitch clusters across windows
+        min_overlap_frac=0.6,                # require substantial overlap for stitching
+        max_centroid_dist=15.0,              # only stitch if centroids are close
     )
 
-    save_df(clustered, 'data/val_day_014_td_hdbscan.parquet')
+    save_df(clustered, 'data/val_day_014_td_hdbscan_small_min_samples.parquet')
+
 
     summary = cluster_summary(clustered)
     print(summary.head(20))

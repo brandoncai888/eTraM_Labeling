@@ -1,4 +1,6 @@
 import time
+from collections import defaultdict
+
 import numpy as np
 import pandas as pd
 
@@ -27,19 +29,42 @@ def _run_chunked(
     overlap: int,
     label_col: str,
     tag: str = 'ST-DBSCAN',
+    x_col: str = 'x',
+    y_col: str = 'y',
+    min_overlap_frac: float = 0.0,
+    max_centroid_dist: float = float('inf'),
 ) -> pd.DataFrame:
     """
     Process df in sliding windows of chunk_size events, overlapping adjacent
     windows by `overlap` events.  A union-find structure merges cluster IDs
     that co-occur in the overlap region, stitching clusters across boundaries.
 
+    Two optional guards prevent spurious merges caused by stray bridge points:
+
+    min_overlap_frac:
+        A pair of clusters is only merged if the number of co-occurring events
+        in the overlap region is at least this fraction of the smaller cluster's
+        total presence in that region.  For example 0.3 means at least 30% of
+        the smaller cluster's overlap events must be shared.  0.0 disables (default).
+
+    max_centroid_dist:
+        A pair of clusters is only merged if their centroids, computed from
+        overlap-region events in raw pixel coordinates, are within this distance.
+        float('inf') disables (default).
+
     Args:
-        df:         Input DataFrame (sorted by time).
-        chunk_fn:   Function that clusters one window; returns int32 label array.
-        chunk_size: Total window size (core + overlap tail).
-        overlap:    Events shared between consecutive windows.
-        label_col:  Column name to write final labels into.
-        tag:        String shown in progress messages.
+        df:                 Input DataFrame (sorted by time).
+        chunk_fn:           Function that clusters one window; returns int32 label array.
+        chunk_size:         Total window size (core + overlap tail).
+        overlap:            Events shared between consecutive windows.
+        label_col:          Column name to write final labels into.
+        tag:                String shown in progress messages.
+        x_col:              x coordinate column, used for centroid computation.
+        y_col:              y coordinate column, used for centroid computation.
+        min_overlap_frac:   Minimum shared fraction of the smaller cluster's overlap
+                            presence required to allow a merge (0.0 = off).
+        max_centroid_dist:  Maximum centroid-to-centroid distance (pixels) allowed
+                            for a merge (inf = off).
 
     Returns:
         Copy of df with label_col appended.  Noise = -1; cluster IDs are
@@ -48,6 +73,11 @@ def _run_chunked(
     stride = chunk_size - overlap
     if stride <= 0:
         raise ValueError(f"overlap ({overlap}) must be less than chunk_size ({chunk_size})")
+
+    use_frac     = min_overlap_frac > 0.0
+    use_centroid = np.isfinite(max_centroid_dist)
+    x_arr = df[x_col].to_numpy(np.float32) if use_centroid else None
+    y_arr = df[y_col].to_numpy(np.float32) if use_centroid else None
 
     n = len(df)
     n_chunks = (n + stride - 1) // stride
@@ -95,9 +125,54 @@ def _run_chunked(
         # Stitch with previous window via overlap region
         if prev_tail is not None and overlap > 0:
             n_ov = min(overlap, len(prev_tail), len(labels))
-            for pl, cl in zip(prev_tail[:n_ov], labels[:n_ov]):
-                if pl >= 0 and cl >= 0:
-                    uf_union(int(pl), int(cl))
+
+            if not use_frac and not use_centroid:
+                # Fast path: original behaviour
+                for pl, cl in zip(prev_tail[:n_ov], labels[:n_ov]):
+                    if pl >= 0 and cl >= 0:
+                        uf_union(int(pl), int(cl))
+            else:
+                # Accumulate co-occurrence counts and optional centroid sums
+                pair_counts    = defaultdict(int)
+                prev_ov_counts = defaultdict(int)
+                curr_ov_counts = defaultdict(int)
+
+                if use_centroid:
+                    ov_x = x_arr[start:start + n_ov]
+                    ov_y = y_arr[start:start + n_ov]
+                    prev_cx: dict = defaultdict(float)
+                    prev_cy: dict = defaultdict(float)
+                    curr_cx: dict = defaultdict(float)
+                    curr_cy: dict = defaultdict(float)
+
+                for j, (pl, cl) in enumerate(zip(prev_tail[:n_ov], labels[:n_ov])):
+                    ipl, icl = int(pl), int(cl)
+                    if pl >= 0:
+                        prev_ov_counts[ipl] += 1
+                        if use_centroid:
+                            prev_cx[ipl] += float(ov_x[j])
+                            prev_cy[ipl] += float(ov_y[j])
+                    if cl >= 0:
+                        curr_ov_counts[icl] += 1
+                        if use_centroid:
+                            curr_cx[icl] += float(ov_x[j])
+                            curr_cy[icl] += float(ov_y[j])
+                    if pl >= 0 and cl >= 0:
+                        pair_counts[(ipl, icl)] += 1
+
+                for (ipl, icl), count in pair_counts.items():
+                    if use_frac:
+                        denom = min(prev_ov_counts[ipl], curr_ov_counts[icl])
+                        if count / denom < min_overlap_frac:
+                            continue
+                    if use_centroid:
+                        cpx = prev_cx[ipl] / prev_ov_counts[ipl]
+                        cpy = prev_cy[ipl] / prev_ov_counts[ipl]
+                        ccx = curr_cx[icl] / curr_ov_counts[icl]
+                        ccy = curr_cy[icl] / curr_ov_counts[icl]
+                        if np.hypot(cpx - ccx, cpy - ccy) > max_centroid_dist:
+                            continue
+                    uf_union(ipl, icl)
 
         # Write core region (overlap tail gets re-clustered next iteration)
         all_labels[start:core_end] = labels[:core_len]
@@ -210,6 +285,8 @@ def run_stdbscan_gpu(
     label_col: str = 'cluster',
     chunk_size: int = None,
     overlap: int = None,
+    min_overlap_frac: float = 0.0,
+    max_centroid_dist: float = float('inf'),
 ) -> pd.DataFrame:
     """
     GPU-accelerated ST-DBSCAN using cuML DBSCAN with Euclidean distance.
@@ -223,17 +300,19 @@ def run_stdbscan_gpu(
     runs entirely on the GPU.
 
     Args:
-        df:           DataFrame with event data, sorted by time.
-        x_col:        Column for x (pixels).
-        y_col:        Column for y (pixels).
-        t_col:        Column for timestamp.
-        eps_spatial:  Neighbourhood radius in scaled 3-D space.
-        eps_temporal: Temporal radius (same unit as t_col).
-        min_pts:      Minimum neighbourhood size for a core point.
-        label_col:    Output column name.
-        chunk_size:   Process in windows of this many events (None = full dataset).
-                      Use when the full dataset exceeds GPU memory or cuML's int32 limit.
-        overlap:      Events shared between consecutive windows (default: chunk_size // 5).
+        df:                 DataFrame with event data, sorted by time.
+        x_col:              Column for x (pixels).
+        y_col:              Column for y (pixels).
+        t_col:              Column for timestamp.
+        eps_spatial:        Neighbourhood radius in scaled 3-D space.
+        eps_temporal:       Temporal radius (same unit as t_col).
+        min_pts:            Minimum neighbourhood size for a core point.
+        label_col:          Output column name.
+        chunk_size:         Process in windows of this many events (None = full dataset).
+                            Use when the full dataset exceeds GPU memory or cuML's int32 limit.
+        overlap:            Events shared between consecutive windows (default: chunk_size // 5).
+        min_overlap_frac:   Passed to _run_chunked; see its docstring.
+        max_centroid_dist:  Passed to _run_chunked; see its docstring.
 
     Returns:
         Copy of df with integer label_col. Noise = -1.
@@ -263,7 +342,10 @@ def run_stdbscan_gpu(
 
     if chunk_size is not None:
         ov = overlap if overlap is not None else chunk_size // 5
-        return _run_chunked(df, _gpu_chunk, chunk_size, ov, label_col, 'GPU ST-DBSCAN')
+        return _run_chunked(df, _gpu_chunk, chunk_size, ov, label_col, 'GPU ST-DBSCAN',
+                            x_col=x_col, y_col=y_col,
+                            min_overlap_frac=min_overlap_frac,
+                            max_centroid_dist=max_centroid_dist)
 
     print(f"GPU ST-DBSCAN on {len(df):,} events "
           f"(eps_s={eps_spatial}, eps_t={eps_temporal}, min_pts={min_pts})...")
@@ -289,6 +371,8 @@ def cluster_events_stdbscan(
     use_gpu: bool = False,
     chunk_size: int = None,
     overlap: int = None,
+    min_overlap_frac: float = 0.0,
+    max_centroid_dist: float = float('inf'),
 ) -> pd.DataFrame:
     """
     Cluster event camera data with ST-DBSCAN on the entire dataset.
@@ -296,31 +380,38 @@ def cluster_events_stdbscan(
     Dispatches to GPU (cuML Euclidean) or CPU (sklearn Chebyshev).
 
     Args:
-        df:           DataFrame with x_col, y_col, t_col columns, sorted by time.
-        x_col:        Column for x coordinate (pixels).
-        y_col:        Column for y coordinate (pixels).
-        t_col:        Column for timestamp.
-        eps_spatial:  Spatial neighbourhood radius (pixels).
-        eps_temporal: Temporal neighbourhood radius (same unit as t_col).
-        min_pts:      Minimum neighbourhood size for a core point.
-        label_col:    Output cluster column name.
-        use_gpu:      Use cuML GPU backend when True.
-        chunk_size:   Process in sliding windows of this many events.
-                      Required for very large datasets that exceed GPU memory or
-                      cuML's internal int32 indexing limit (~500k–2M events).
-                      If None and GPU fails with a CUDA error, automatically
-                      retries with chunk_size=500_000.
-        overlap:      Events shared between consecutive windows
-                      (default: chunk_size // 5).
+        df:                 DataFrame with x_col, y_col, t_col columns, sorted by time.
+        x_col:              Column for x coordinate (pixels).
+        y_col:              Column for y coordinate (pixels).
+        t_col:              Column for timestamp.
+        eps_spatial:        Spatial neighbourhood radius (pixels).
+        eps_temporal:       Temporal neighbourhood radius (same unit as t_col).
+        min_pts:            Minimum neighbourhood size for a core point.
+        label_col:          Output cluster column name.
+        use_gpu:            Use cuML GPU backend when True.
+        chunk_size:         Process in sliding windows of this many events.
+                            Required for very large datasets that exceed GPU memory or
+                            cuML's internal int32 indexing limit (~500k–2M events).
+                            If None and GPU fails with a CUDA error, automatically
+                            retries with chunk_size=500_000.
+        overlap:            Events shared between consecutive windows
+                            (default: chunk_size // 5).
+        min_overlap_frac:   Only merge two clusters across a chunk boundary if their
+                            co-occurring overlap events are at least this fraction of the
+                            smaller cluster's overlap presence.  Prevents a single bridge
+                            point from merging two large separate clusters.  0.0 = off.
+        max_centroid_dist:  Only merge two clusters if their centroids in the overlap
+                            region are within this many pixels of each other.  inf = off.
 
     Returns:
         Copy of df with integer label_col. Noise = -1.
 
     Examples:
-        # GPU processing, large dataset
+        # GPU processing, large dataset, with merge guards
         clustered = cluster_events_stdbscan(
             df, eps_spatial=3, eps_temporal=5000, min_pts=50,
             use_gpu=True, chunk_size=500_000,
+            min_overlap_frac=0.3, max_centroid_dist=10.0,
         )
 
         # CPU processing
@@ -334,6 +425,7 @@ def cluster_events_stdbscan(
         eps_spatial=eps_spatial, eps_temporal=eps_temporal,
         min_pts=min_pts, label_col=label_col,
         chunk_size=chunk_size, overlap=overlap,
+        min_overlap_frac=min_overlap_frac, max_centroid_dist=max_centroid_dist,
     )
     cpu_kwargs = dict(
         df=df,
@@ -374,12 +466,14 @@ if __name__ == "__main__":
 
     clustered = cluster_events_stdbscan(
         df,
-        eps_spatial=4.5,        # pixels
-        eps_temporal=10000.0,   # µs  (adjust to match your timestamp unit)
-        min_pts=100,
+        eps_spatial=7.0,        # pixels
+        eps_temporal=15000.0,   # µs  (adjust to match your timestamp unit)
+        min_pts=50,
         use_gpu=True,
-        chunk_size=350_000,     # prevent cuML int32 overflow on large datasets
-        overlap=25_000,    # some events shared between windows to stitch clusters
+        chunk_size=150_000,     # prevent cuML int32 overflow on large datasets
+        overlap=10_000,         # some events shared between windows to stitch clusters
+        min_overlap_frac=0.5,   # require substantial overlap for stitching
+        max_centroid_dist=20.0, # only stitch if centroids are close
     )
 
     save_df(clustered, 'data/val_day_014_td_stdbscan.parquet')

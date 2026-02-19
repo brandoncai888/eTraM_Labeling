@@ -1,3 +1,5 @@
+import time
+from collections import deque
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -56,7 +58,7 @@ def plot_3d_open3d(
     # 4. Extract coordinates
     points = np.zeros((len(df), 3))
     points[:, 0] = df[x_col].values
-    points[:, 1] = df[t_col].values/10000.0  # Scale time for better visualization
+    points[:, 1] = df[t_col].values/1000.0  # Scale time for better visualization
 
     # Use display height to invert image Y such that displayed Z = (height - y).
     # Prefer a `height` column in the dataframe; otherwise default to 720.
@@ -217,6 +219,7 @@ def animate_frames(
     ax.set_axis_off()
 
     state = {'frame': 0, 'paused': False}
+    fps_state = {'last': None, 'history': deque(maxlen=30), 'count': 0}
 
     def frame_gen():
         while True:
@@ -271,6 +274,17 @@ def animate_frames(
     title = ax.set_title('')
 
     def update(frame_idx):
+        _t = time.perf_counter()
+        if fps_state['last'] is not None:
+            fps_state['history'].append(_t - fps_state['last'])
+        fps_state['last'] = _t
+        fps_state['count'] += 1
+
+        live_fps = (1.0 / (sum(fps_state['history']) / len(fps_state['history']))
+                    if fps_state['history'] else 0.0)
+        if fps_state['count'] % 30 == 0:
+            print(f"  Frame {frame_idx + 1}/{n_frames} | FPS: {live_fps:.1f}")
+
         lo = left_indices[frame_idx]
         hi = right_indices[frame_idx]
 
@@ -299,7 +313,7 @@ def animate_frames(
         title.set_text(
             f'Frame {frame_idx + 1}/{n_frames}   '
             f't = [{boundaries[frame_idx]:,.0f} – {boundaries[frame_idx + 1]:,.0f}] µs   '
-            f'events: {hi - lo:,}'
+            f'events: {hi - lo:,}   FPS: {live_fps:.1f}'
         )
         return im, title
 

@@ -179,42 +179,72 @@ def run_hdbscan_gpu_chunked(
     metric: str = 'euclidean',
     label_col: str = 'cluster',
     chunk_size: int = 2_000_000,
+    overlap: int = 0,
 ) -> pd.DataFrame:
     """
     GPU-accelerated HDBSCAN processed in temporal chunks to fit GPU memory.
 
-    Events are assumed to be sorted by time (or at least chunked in temporal
-    order). Each chunk is clustered independently on the GPU; cluster IDs are
-    offset so they are globally unique across chunks. Noise points (-1) are
-    never offset.
+    Events are assumed to be sorted by time. Each chunk overlaps with the next
+    by `overlap` events. Events in the overlap region are clustered by both
+    adjacent chunks; a union-find structure merges cluster IDs that co-occur
+    in the overlap, stitching clusters across chunk boundaries. Noise (-1) is
+    never merged.
 
     Args:
-        df:                         DataFrame with event data.
-        chunk_size:                 Maximum number of events per GPU batch.
-                                    Reduce if you still see OOM errors.
-                                    Increase for fewer boundary artefacts.
+        df:         DataFrame with event data.
+        chunk_size: Maximum number of events per GPU batch (includes overlap).
+                    Reduce if you see OOM errors.
+        overlap:    Number of events shared between adjacent chunks.
+                    Set to roughly the expected maximum cluster size in events
+                    so boundary-spanning clusters are properly linked.
+                    0 disables stitching (clusters may be split at boundaries).
 
     Returns:
         Copy of df with an integer `label_col` column appended.
-        Cluster IDs are unique across chunks; noise is -1.
+        Cluster IDs are contiguous non-negative integers; noise is -1.
     """
     if not HAS_CUML:
         raise ImportError(
             "cuML is not installed. Install RAPIDS: https://rapids.ai/start.html"
         )
 
+    stride = chunk_size - overlap
+    if stride <= 0:
+        raise ValueError(f"overlap ({overlap}) must be less than chunk_size ({chunk_size})")
+
     n = len(df)
-    n_chunks = (n + chunk_size - 1) // chunk_size
-    print(f"Chunked GPU HDBSCAN: {n:,} events → {n_chunks} chunk(s) of ~{chunk_size:,}...")
+    n_chunks = (n + stride - 1) // stride
+    print(f"Chunked GPU HDBSCAN: {n:,} events, {n_chunks} chunk(s), "
+          f"chunk_size={chunk_size:,}, overlap={overlap:,}...")
 
     all_labels = np.full(n, -1, dtype=np.int32)
     next_cluster_id = 0
 
-    for i in range(n_chunks):
-        start = i * chunk_size
-        end = min(start + chunk_size, n)
-        chunk = df.iloc[start:end]
+    # Union-find (path-compressed, dict-based)
+    uf_parent: dict = {}
 
+    def uf_find(x: int) -> int:
+        root = x
+        while uf_parent.get(root, root) != root:
+            root = uf_parent.get(root, root)
+        while uf_parent.get(x, x) != root:
+            uf_parent[x], x = root, uf_parent.get(x, x)
+        return root
+
+    def uf_union(a: int, b: int) -> None:
+        a, b = uf_find(a), uf_find(b)
+        if a != b:
+            uf_parent[max(a, b)] = min(a, b)
+
+    prev_overlap_labels = None  # offset labels for the tail of the previous chunk
+
+    for i in range(n_chunks):
+        start = i * stride
+        end = min(start + chunk_size, n)
+        core_end = min(start + stride, n)  # events [start, core_end) are "owned" by this chunk
+        core_len = core_end - start
+
+        chunk = df.iloc[start:end]
         features = build_feature_matrix(chunk, x_col, y_col, t_col, time_scale)
         features_gpu = cp.asarray(features)
 
@@ -225,17 +255,50 @@ def run_hdbscan_gpu_chunked(
             cluster_selection_method=cluster_selection_method,
             metric=metric,
         )
-        chunk_labels = cp.asnumpy(clusterer.fit_predict(features_gpu)).astype(np.int32)
-        del features_gpu  # release GPU memory before next chunk
+        raw_labels = cp.asnumpy(clusterer.fit_predict(features_gpu)).astype(np.int32)
+        del features_gpu
 
+        # Offset to make IDs globally unique before stitching
+        chunk_labels = raw_labels.copy()
         mask = chunk_labels >= 0
         if mask.any():
             chunk_labels[mask] += next_cluster_id
             next_cluster_id = int(chunk_labels[mask].max()) + 1
 
-        all_labels[start:end] = chunk_labels
-        print(f"  Chunk {i+1}/{n_chunks}: {mask.sum():,} clustered, "
-              f"{(~mask).sum():,} noise, {next_cluster_id:,} total clusters so far")
+        # Stitch: events [start, start+overlap) appear in prev chunk's tail too
+        if prev_overlap_labels is not None and overlap > 0:
+            actual_overlap = min(overlap, len(prev_overlap_labels), len(chunk_labels))
+            for prev_lbl, curr_lbl in zip(
+                prev_overlap_labels[:actual_overlap],
+                chunk_labels[:actual_overlap],
+            ):
+                if prev_lbl >= 0 and curr_lbl >= 0:
+                    uf_union(int(prev_lbl), int(curr_lbl))
+
+        # Write only the core region; overlap tail is re-clustered in next chunk
+        all_labels[start:core_end] = chunk_labels[:core_len]
+
+        # Last chunk: also write the tail (nothing will re-process it)
+        if i == n_chunks - 1 and end > core_end:
+            all_labels[core_end:end] = chunk_labels[core_len:]
+
+        prev_overlap_labels = chunk_labels[core_len:] if end > core_end else None
+
+        n_clustered = int((chunk_labels[:core_len] >= 0).sum())
+        print(f"  Chunk {i+1}/{n_chunks}: {core_len:,} core events, "
+              f"{n_clustered:,} clustered, {next_cluster_id:,} raw cluster IDs so far")
+
+    # Apply union-find: build a compact O(next_cluster_id) lookup, then apply in O(n)
+    if next_cluster_id > 0:
+        lookup = np.array([uf_find(lbl) for lbl in range(next_cluster_id)], dtype=np.int32)
+        _, inverse = np.unique(lookup, return_inverse=True)
+        lookup = inverse.astype(np.int32)  # root → contiguous ID
+
+        valid = all_labels >= 0
+        all_labels[valid] = lookup[all_labels[valid]]
+        n_final = int(lookup.max()) + 1
+        print(f"After stitching: {n_final:,} final clusters "
+              f"(merged from {next_cluster_id:,} raw IDs)")
 
     out = df.copy()
     out[label_col] = all_labels
@@ -256,6 +319,7 @@ def cluster_events(
     label_col: str = 'cluster',
     use_gpu: bool = False,
     chunk_size: int = None,
+    overlap: int = 0,
 ) -> pd.DataFrame:
     """
     Cluster event camera data with HDBSCAN.
@@ -317,7 +381,7 @@ def cluster_events(
             print("Warning: GPU/cuML not available, falling back to CPU HDBSCAN.")
         elif chunk_size is not None:
             try:
-                return run_hdbscan_gpu_chunked(**kwargs, chunk_size=chunk_size)
+                return run_hdbscan_gpu_chunked(**kwargs, chunk_size=chunk_size, overlap=overlap)
             except Exception as e:
                 raise RuntimeError(
                     f"Chunked GPU clustering failed on chunk (chunk_size={chunk_size}): "
@@ -368,7 +432,7 @@ if __name__ == "__main__":
     from extract import extract,save_df
 
     df = extract('data/val_day_014_td.h5')
-    clustered = cluster_events(df, time_scale=2000, min_cluster_size=100, use_gpu=True, chunk_size=50_000)
+    clustered = cluster_events(df, time_scale=2000, min_cluster_size=100, use_gpu=True, chunk_size=50_000,overlap=5_000)
 
     save_df(clustered, 'data/val_day_014_td_clustered.parquet')
 

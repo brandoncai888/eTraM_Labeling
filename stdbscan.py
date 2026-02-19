@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd
 
@@ -73,8 +74,10 @@ def _run_chunked(
             uf[max(a, b)] = min(a, b)
 
     prev_tail: np.ndarray = None   # offset labels for prev window's tail
+    t_total_start = time.time()
 
     for i in range(n_chunks):
+        t_window_start = time.time()
         start    = i * stride
         end      = min(start + chunk_size, n)
         core_end = min(start + stride, n)
@@ -106,8 +109,12 @@ def _run_chunked(
         prev_tail = labels[core_len:] if end > core_end else None
 
         n_clust = int((labels[:core_len] >= 0).sum())
+        elapsed = time.time() - t_window_start
+        total_elapsed = time.time() - t_total_start
+        eta = (total_elapsed / (i + 1)) * (n_chunks - i - 1)
         print(f"  Window {i+1}/{n_chunks}: {core_len:,} core events, "
-              f"{n_clust:,} clustered, {next_cluster_id:,} raw IDs so far")
+              f"{n_clust:,} clustered, {next_cluster_id:,} raw IDs | "
+              f"{elapsed:.1f}s | elapsed {total_elapsed:.0f}s | ETA {eta:.0f}s")
 
     # Apply union-find and remap to contiguous IDs
     if next_cluster_id > 0:

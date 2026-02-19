@@ -166,6 +166,82 @@ def run_hdbscan_gpu(
     return out
 
 
+def run_hdbscan_gpu_chunked(
+    df: pd.DataFrame,
+    x_col: str = 'x',
+    y_col: str = 'y',
+    t_col: str = 't',
+    time_scale: float = 1e-3,
+    min_cluster_size: int = 10,
+    min_samples: int = None,
+    cluster_selection_epsilon: float = 0.0,
+    cluster_selection_method: str = 'eom',
+    metric: str = 'euclidean',
+    label_col: str = 'cluster',
+    chunk_size: int = 2_000_000,
+) -> pd.DataFrame:
+    """
+    GPU-accelerated HDBSCAN processed in temporal chunks to fit GPU memory.
+
+    Events are assumed to be sorted by time (or at least chunked in temporal
+    order). Each chunk is clustered independently on the GPU; cluster IDs are
+    offset so they are globally unique across chunks. Noise points (-1) are
+    never offset.
+
+    Args:
+        df:                         DataFrame with event data.
+        chunk_size:                 Maximum number of events per GPU batch.
+                                    Reduce if you still see OOM errors.
+                                    Increase for fewer boundary artefacts.
+
+    Returns:
+        Copy of df with an integer `label_col` column appended.
+        Cluster IDs are unique across chunks; noise is -1.
+    """
+    if not HAS_CUML:
+        raise ImportError(
+            "cuML is not installed. Install RAPIDS: https://rapids.ai/start.html"
+        )
+
+    n = len(df)
+    n_chunks = (n + chunk_size - 1) // chunk_size
+    print(f"Chunked GPU HDBSCAN: {n:,} events → {n_chunks} chunk(s) of ~{chunk_size:,}...")
+
+    all_labels = np.full(n, -1, dtype=np.int32)
+    next_cluster_id = 0
+
+    for i in range(n_chunks):
+        start = i * chunk_size
+        end = min(start + chunk_size, n)
+        chunk = df.iloc[start:end]
+
+        features = build_feature_matrix(chunk, x_col, y_col, t_col, time_scale)
+        features_gpu = cp.asarray(features)
+
+        clusterer = cuHDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples if min_samples is not None else min_cluster_size,
+            cluster_selection_epsilon=cluster_selection_epsilon,
+            cluster_selection_method=cluster_selection_method,
+            metric=metric,
+        )
+        chunk_labels = cp.asnumpy(clusterer.fit_predict(features_gpu)).astype(np.int32)
+        del features_gpu  # release GPU memory before next chunk
+
+        mask = chunk_labels >= 0
+        if mask.any():
+            chunk_labels[mask] += next_cluster_id
+            next_cluster_id = int(chunk_labels[mask].max()) + 1
+
+        all_labels[start:end] = chunk_labels
+        print(f"  Chunk {i+1}/{n_chunks}: {mask.sum():,} clustered, "
+              f"{(~mask).sum():,} noise, {next_cluster_id:,} total clusters so far")
+
+    out = df.copy()
+    out[label_col] = all_labels
+    return out
+
+
 def cluster_events(
     df: pd.DataFrame,
     x_col: str = 'x',
@@ -179,6 +255,7 @@ def cluster_events(
     metric: str = 'euclidean',
     label_col: str = 'cluster',
     use_gpu: bool = False,
+    chunk_size: int = None,
 ) -> pd.DataFrame:
     """
     Cluster event camera data with HDBSCAN.
@@ -208,6 +285,10 @@ def cluster_events(
         metric:                     Distance metric ('euclidean', 'l1', ...).
         label_col:                  Name added to the returned DataFrame.
         use_gpu:                    Use cuML GPU backend if True.
+        chunk_size:                 If set, process the dataset in chunks of
+                                    this many events on the GPU. Useful when
+                                    the full dataset exceeds GPU memory.
+                                    Ignored when use_gpu=False.
 
     Returns:
         Copy of df with an integer `label_col` column.
@@ -232,7 +313,27 @@ def cluster_events(
         label_col=label_col,
     )
     if use_gpu:
-        return run_hdbscan_gpu(**kwargs)
+        if not HAS_CUML:
+            print("Warning: GPU/cuML not available, falling back to CPU HDBSCAN.")
+        elif chunk_size is not None:
+            try:
+                return run_hdbscan_gpu_chunked(**kwargs, chunk_size=chunk_size)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Chunked GPU clustering failed on chunk (chunk_size={chunk_size}): "
+                    f"{type(e).__name__}: {e}\n"
+                    f"Try a smaller chunk_size."
+                ) from e
+        else:
+            try:
+                return run_hdbscan_gpu(**kwargs)
+            except MemoryError as e:
+                raise RuntimeError(
+                    f"GPU out of memory for {len(df):,} events. "
+                    f"Re-run with chunk_size=2_000_000 to process in batches."
+                ) from e
+            except Exception as e:
+                print(f"Warning: GPU clustering failed ({type(e).__name__}: {e}), falling back to CPU HDBSCAN.")
     return run_hdbscan(**kwargs)
 
 
@@ -267,7 +368,7 @@ if __name__ == "__main__":
     from extract import extract,save_df
 
     df = extract('data/val_day_014_td.h5')
-    clustered = cluster_events(df, time_scale=10000, min_cluster_size=50,use_gpu=True)
+    clustered = cluster_events(df, time_scale=2000, min_cluster_size=100, use_gpu=True, chunk_size=50_000)
 
     save_df(clustered, 'data/val_day_014_td_clustered.parquet')
 

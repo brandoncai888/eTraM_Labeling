@@ -27,7 +27,7 @@ def plot_3d_open3d(
     t_start: float = None,
     t_end: float = None,
     max_points: int = 1_000_000,
-    color_by_polarity: bool = True,
+    color_by_polarity: bool = False,
     color_by_id: bool = False,
     point_size: float = 0.1,
     show_axes: bool = True
@@ -257,10 +257,10 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/val_day_014_td.h5'
+    FILE = 'data/val_day_014_td_clustered.parquet'
 
     # 3-D scatter of a random subset
-    plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503)
+    plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")
 
     # Animated frames
-    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_polarity=True)
+    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=True, id_col="cluster")

@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.widgets import Button
 
 from extract import extract
 
@@ -77,9 +78,13 @@ def plot_3d_open3d(
         unique_ids = np.unique(ids)
         
         # Generate a deterministic color palette for unique IDs
-        rng = np.random.default_rng(seed=42) 
+        rng = np.random.default_rng(seed=42)
         palette = rng.random((len(unique_ids), 3))
-        
+
+        # Noise events (id == -1) are always black
+        if -1 in unique_ids:
+            palette[np.searchsorted(unique_ids, -1)] = [0.0, 0.0, 0.0]
+
         # Map IDs to their corresponding color in the palette
         # id_map creates an index for each unique ID
         id_to_idx = {uid: i for i, uid in enumerate(unique_ids)}
@@ -177,6 +182,11 @@ def animate_frames(
         unique_ids = np.unique(id_vals)
         rng = np.random.default_rng(seed=42)
         palette = rng.random((len(unique_ids), 3))
+
+        # Noise events (id == -1) are always black
+        if -1 in unique_ids:
+            palette[np.searchsorted(unique_ids, -1)] = [0.0, 0.0, 0.0]
+
         id_to_idx = {uid: i for i, uid in enumerate(unique_ids)}
         indices_all = np.array([id_to_idx[uid] for uid in id_vals])
 
@@ -195,7 +205,51 @@ def animate_frames(
     right_indices = np.searchsorted(t_vals, boundaries[1:n_frames + 1], side='left')
 
     fig, ax = plt.subplots(figsize=figsize)
+    fig.subplots_adjust(bottom=0.1)
     ax.set_axis_off()
+
+    state = {'frame': 0, 'paused': False}
+
+    def frame_gen():
+        while True:
+            yield state['frame']
+            if not state['paused']:
+                state['frame'] = (state['frame'] + 1) % n_frames
+
+    pause_ax  = fig.add_axes([0.10, 0.02, 0.13, 0.05])
+    back5_ax  = fig.add_axes([0.25, 0.02, 0.13, 0.05])
+    ff15_ax   = fig.add_axes([0.40, 0.02, 0.13, 0.05])
+    back15_ax = fig.add_axes([0.55, 0.02, 0.13, 0.05])
+    ff30_ax   = fig.add_axes([0.70, 0.02, 0.13, 0.05])
+
+    pause_btn  = Button(pause_ax,  'Pause')
+    back5_btn  = Button(back5_ax,  '◀◀ -5')
+    ff15_btn   = Button(ff15_ax,   '+15 ▶▶')
+    back15_btn = Button(back15_ax, '◀◀ -15')
+    ff30_btn   = Button(ff30_ax,   '+30 ▶▶')
+
+    def toggle(_event):
+        state['paused'] = not state['paused']
+        if state['paused']:
+            ani.pause()
+            pause_btn.label.set_text('Resume')
+        else:
+            ani.resume()
+            pause_btn.label.set_text('Pause')
+        fig.canvas.draw_idle()
+
+    def make_jump(delta):
+        def _jump(_event):
+            state['frame'] = max(0, min(state['frame'] + delta, n_frames - 1))
+            update(state['frame'])
+            fig.canvas.draw_idle()
+        return _jump
+
+    pause_btn.on_clicked(toggle)
+    back5_btn.on_clicked(make_jump(-5))
+    ff15_btn.on_clicked(make_jump(15))
+    back15_btn.on_clicked(make_jump(-15))
+    ff30_btn.on_clicked(make_jump(30))
 
     # Initialise with a white canvas; origin='upper' puts row 0 (y=0) at top
     # If coloring by polarity or by id we need an RGB canvas, otherwise single channel
@@ -242,7 +296,8 @@ def animate_frames(
         return im, title
 
     ani = animation.FuncAnimation(
-        fig, update, frames=n_frames, interval=interval, blit=True,
+        fig, update, frames=frame_gen(), interval=interval, blit=True,
+        cache_frame_data=False,
     )
 
     if save_path is not None:
@@ -257,7 +312,7 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/val_day_014_td_clustered.parquet'
+    FILE = 'data/val_day_014_td_stdbscan_small_eps.parquet'
 
     # 3-D scatter of a random subset
     plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")

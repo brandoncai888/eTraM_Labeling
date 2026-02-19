@@ -65,7 +65,7 @@ def plot_3d_open3d(
     else:
         display_height = 720
 
-    points[:, 2] = display_height - df[y_col].values
+    points[:, 2] = df[y_col].values
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
@@ -114,8 +114,16 @@ def plot_3d_open3d(
         vis.add_geometry(axes)
 
     vis.get_render_option().point_size = point_size
-    vis.get_render_option().background_color = np.asarray([1, 1, 1]) 
-    
+    vis.get_render_option().background_color = np.asarray([1, 1, 1])
+
+    vis.poll_events()
+    vis.update_renderer()
+    ctr = vis.get_view_control()
+    ctr.set_front([0.026849934981634876, 0.99938368720401627, -0.022612535063256663])
+    ctr.set_lookat([354.3481600111744, 1986.9705234695316, 303.55364828999643])
+    ctr.set_up([0.066193756836045309, -0.024348526697291598, -0.99750966702263177])
+    ctr.set_zoom(0.64000000000000012)
+
     vis.run()
     vis.destroy_window()
 
@@ -312,7 +320,7 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/val_day_014_td_stdbscan_small_eps.parquet'
+    FILE = 'data/val_day_014_td_stdbscan.parquet'
 
     # 3-D scatter of a random subset
     plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")

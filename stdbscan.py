@@ -368,14 +368,14 @@ if __name__ == "__main__":
     clustered = cluster_events_stdbscan(
         df,
         eps_spatial=5.0,        # pixels
-        eps_temporal=10000.0,   # µs  (adjust to match your timestamp unit)
+        eps_temporal=14000.0,   # µs  (adjust to match your timestamp unit)
         min_pts=25,
         use_gpu=True,
-        chunk_size=180_000,     # prevent cuML int32 overflow on large datasets
-        overlap=15_000,    # some events shared between windows to stitch clusters
+        chunk_size=150_000,     # prevent cuML int32 overflow on large datasets
+        overlap=10_000,    # some events shared between windows to stitch clusters
     )
 
-    save_df(clustered, 'data/val_day_014_td_stdbscan_small_eps.parquet')
+    save_df(clustered, 'data/val_day_014_td_stdbscan.parquet')
 
     summary = cluster_summary(clustered)
     print(summary.head(20))

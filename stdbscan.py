@@ -466,14 +466,14 @@ if __name__ == "__main__":
 
     clustered = cluster_events_stdbscan(
         df,
-        eps_spatial=7.0,        # pixels
-        eps_temporal=15000.0,   # µs  (adjust to match your timestamp unit)
-        min_pts=50,
+        eps_spatial=7.5,        # pixels
+        eps_temporal=16000.0,   # µs  (adjust to match your timestamp unit)
+        min_pts=100,
         use_gpu=True,
-        chunk_size=150_000,     # prevent cuML int32 overflow on large datasets
-        overlap=10_000,         # some events shared between windows to stitch clusters
+        chunk_size=500_000,     # prevent cuML int32 overflow on large datasets
+        overlap=40_000,         # some events shared between windows to stitch clusters
         min_overlap_frac=0.5,   # require substantial overlap for stitching
-        max_centroid_dist=20.0, # only stitch if centroids are close
+        max_centroid_dist=100.0, # only stitch if centroids are close
     )
 
     save_df(clustered, 'data/val_day_014_td_stdbscan.parquet')

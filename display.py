@@ -335,7 +335,7 @@ def animate_frames(
 
 if __name__ == '__main__':
     FILE = 'data/val_day_014_td_stdbscan.parquet'
-
+ 
     # 3-D scatter of a random subset
     plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")
 

@@ -392,18 +392,18 @@ if __name__ == "__main__":
     clustered = cluster_events_hdbscan(
         df,
         spatial_threshold=2_000.0,          # 5000 µs ≡ 1 pixel
-        min_cluster_size=50,                 # reject clusters < 200 events
+        min_cluster_size=100,                 # reject clusters < 200 events
         min_samples=20,                      # stricter noise rejection
-        cluster_selection_epsilon=2.0,       # merge fragments within 2 px
+        cluster_selection_epsilon=1.5,       # merge fragments within 2 px
         cluster_selection_method='eom',
         use_gpu=True,
-        chunk_size=100_000,                  # fit in GPU memory
-        overlap=10_000,                      # stitch clusters across windows
-        min_overlap_frac=0.6,                # require substantial overlap for stitching
-        max_centroid_dist=15.0,              # only stitch if centroids are close
+        chunk_size=400_000,                  # fit in GPU memory
+        overlap=30_000,                      # stitch clusters across windows
+        min_overlap_frac=0.5,                # require substantial overlap for stitching
+        max_centroid_dist=75.0,              # only stitch if centroids are close
     )
 
-    save_df(clustered, 'data/val_day_014_td_hdbscan_small_min_samples.parquet')
+    save_df(clustered, 'data/val_day_014_td_hdbscan.parquet')
 
 
     summary = cluster_summary(clustered)

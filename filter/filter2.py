@@ -1,4 +1,4 @@
-import cupy as np
+import numpy as np # import numpy as np
 import pickle
 #import matplotlib.pyplot as plt
 #import matplotlib.animation as animation
@@ -6,8 +6,7 @@ import pickle
 from math import floor, ceil, sqrt
 from collections import defaultdict
 
-from filter.util import *
-
+from util import *
 
 def subdivide(W, H, k, Et, Epix, Epol):
     w, h = ceil(W/k), ceil(H/k)
@@ -17,14 +16,18 @@ def subdivide(W, H, k, Et, Epix, Epol):
     Epix_sub = [[None for j in range(w)] for i in range(h)]
     Epol_sub = [[None for j in range(w)] for i in range(h)]
     for i in range(h):
+        idx1 = (Ey >= i*k) & (Ey < (i+1)*k)
+        Et_i = Et[idx1]
+        Epol_i = Epol[idx1]
+        Ey_i = Ey[idx1]
+        Ex_i = Ex[idx1]
         print(i)
         for j in range(w):
-            idx = ( (Ey >= i*k) & (Ey < (i+1)*k) & (Ex >= j*k) & (Ex < (j+1)*k) ) #= np.logical_and.reduce((Ey >= i*k, Ey < (i+1)*k, Ex >= j*k, Ex < (j+1)*k)) #
-            Et_sub[i][j] = Et[idx]
-            Epix_sub[i][j] = (Ey[idx]-i*k)*k + (Ex[idx]-j*k)
-            Epol_sub[i][j] = Epol[idx]
+            idx = ( (Ex_i >= j*k) & (Ex_i < (j+1)*k) ) #= np.logical_and.reduce((Ey >= i*k, Ey < (i+1)*k, Ex >= j*k, Ex < (j+1)*k)) #
+            Et_sub[i][j] = Et_i[idx]
+            Epix_sub[i][j] = ((Ey_i[idx]-i*k)*k + (Ex_i[idx]-j*k))
+            Epol_sub[i][j] = Epol_i[idx]
     return Et_sub, Epix_sub, Epol_sub
-
 
 def combine(W, H, k, Et_sub, Epix_sub, Epol_sub):
     Et = np.concatenate([np.concatenate(Et_sub[i]) for i in range(len(Et_sub))])
@@ -66,9 +69,11 @@ def patch_direction(W, H, k, Et, Epix):
     Epix_out = [[list() for j in range(w)] for i in range(h)]
     Epol_out = [[list() for j in range(w)] for i in range(h)]
 
-    states = np.array([np.zeros((k,)) for _ in range(4)])
+    
     # states = np.array([np.zeros((1,)) for _ in range(4)])
+    states = np.array([np.zeros((k,)) for _ in range(4)])
     for i in range(h):
+        print(i)
         for j in range(w):
             Ex, Ey = XY(k, k, Epix_sub[i][j])
             for tdx in range(len(Et_sub[i][j])):
@@ -196,4 +201,59 @@ def apply_mask(W, H, Et, Epix, Epol, Et_roi, RM):
                 Epix_out.append(Epix[tdx])
                 Epol_out.append(Epol[tdx])
             tdx += 1
+    return np.array(Et_out), np.array(Epix_out), np.array(Epol_out)
+
+
+def apply_roi(w, h, k, Et_multi, Epix_multi, Epol_multi, W, H, Et, Epix, Epol):
+    """
+    Combined roi_mask and apply_mask without allocating arrays or storing mask states.
+    Builds 2D mask incrementally and applies filtering simultaneously.
+    
+    Args:
+        w, h, k: ROI mask dimensions (from multipatch_direction output)
+        Et_multi, Epix_multi, Epol_multi: Events from multipatch_direction
+        W, H: Original image dimensions
+        Et, Epix, Epol: Original events to filter
+    
+    Returns:
+        Et_out, Epix_out, Epol_out: Filtered events within active ROI regions
+    """
+    Ex_multi, Ey_multi = XY(w, h, Epix_multi)
+    Ex, Ey = XY(W, H, Epix)
+    
+    Et_out = list()
+    Epix_out = list()
+    Epol_out = list()
+    
+    # Only current 2D mask needed (with padding for boundary safety)
+    current_mask = np.zeros(((h + 2) * k, (w + 2) * k), dtype=int)
+    tdx = np.where(Et > Et_multi[0])[0][0]
+    
+    for tdx_roi in range(len(Et_multi) - 1):
+        # Update mask based on current Et_multi event
+        x, y = Ex_multi[tdx_roi] + 1, Ey_multi[tdx_roi] + 1
+        pol = Epol_multi[tdx_roi]
+        
+        if pol == 0:
+            current_mask[(y+1)*k:(y+2)*k, x*k:(x+1)*k] = 1
+            current_mask[(y-1)*k:y*k, x*k:(x+1)*k] = 0
+        elif pol == 1:
+            current_mask[y*k:(y+1)*k, (x+1)*k:(x+2)*k] = 1
+            current_mask[y*k:(y+1)*k, (x-1)*k:x*k] = 0
+        elif pol == 2:
+            current_mask[(y-1)*k:y*k, x*k:(x+1)*k] = 1
+            current_mask[y*k:(y+1)*k, x*k:(x+1)*k] = 0
+        elif pol == 3:
+            current_mask[y*k:(y+1)*k, (x-1)*k:x*k] = 1
+            current_mask[y*k:(y+1)*k, x*k:(x+1)*k] = 0
+        
+        # Filter original events in time window using current mask
+        while tdx < len(Et) and Et[tdx] <= Et_multi[tdx_roi + 1]:
+            # Access mask with padding offset
+            if current_mask[Ey[tdx] + k, Ex[tdx] + k] == 1:
+                Et_out.append(Et[tdx])
+                Epix_out.append(Epix[tdx])
+                Epol_out.append(Epol[tdx])
+            tdx += 1
+    
     return np.array(Et_out), np.array(Epix_out), np.array(Epol_out)

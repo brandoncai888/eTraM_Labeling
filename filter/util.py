@@ -1,7 +1,7 @@
-import cupy as np
+import numpy as np # import numpy as np 
 import pandas as pd
 
 def XY(W,H,Epix):
-    Ex = Epix / W
-    Ey = Epix % W
-    return Ex,Ey
+    Ey = Epix / W
+    Ex = Epix % W
+    return Ex.astype(int),Ey.astype(int)

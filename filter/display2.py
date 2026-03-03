@@ -160,6 +160,7 @@ def animate_frames(
     save_path: str = None,
     fps: int = 20,
     max_frames: int = None,
+    exclude_ids: list = None,
 ):
     """
     Animate event camera data as a sequence of frames.
@@ -186,6 +187,7 @@ def animate_frames(
                             Requires pillow (gif) or ffmpeg (mp4).
         fps:                Frames per second when saving.
         max_frames:         Cap the total number of frames rendered. None = all.
+        exclude_ids:        List of integer IDs to exclude from animation. None = show all.
 
     Returns:
         matplotlib.animation.FuncAnimation object.
@@ -198,6 +200,15 @@ def animate_frames(
     y_vals = df[y_col].to_numpy(dtype=np.intp)
     p_vals = df[p_col].to_numpy() if p_col in df.columns else None
     id_vals = df[id_col].to_numpy() if id_col in df.columns else None
+
+    # Filter out excluded IDs
+    if exclude_ids is not None and id_vals is not None:
+        mask = ~np.isin(id_vals, exclude_ids)
+        t_vals = t_vals[mask]
+        x_vals = x_vals[mask]
+        y_vals = y_vals[mask]
+        p_vals = p_vals[mask] if p_vals is not None else None
+        id_vals = id_vals[mask]
 
     # Pre-compute deterministic palette mapping for IDs if requested
     if color_by_id and id_vals is not None:
@@ -241,7 +252,11 @@ def animate_frames(
 
     fig, ax = plt.subplots(figsize=figsize)
     fig.subplots_adjust(bottom=0.1)
-    ax.set_axis_off()
+    ax.set_xlim(0, width)
+    ax.set_ylim(height, 0)  # Flip y-axis to match image origin at top
+    ax.set_xlabel('X (pixels)')
+    ax.set_ylabel('Y (pixels)')
+    ax.grid(True, alpha=0.3)
 
     state = {'frame': 0, 'paused': False}
     fps_state = {'last': None, 'history': deque(maxlen=30), 'count': 0}
@@ -251,19 +266,22 @@ def animate_frames(
             yield state['frame']
             if not state['paused']:
                 state['frame'] = (state['frame'] + 1) % n_frames
-
-    pause_ax  = fig.add_axes([0.10, 0.02, 0.13, 0.05])
-    back5_ax  = fig.add_axes([0.25, 0.02, 0.13, 0.05])
-    ff15_ax   = fig.add_axes([0.40, 0.02, 0.13, 0.05])
-    back15_ax = fig.add_axes([0.55, 0.02, 0.13, 0.05])
-    ff30_ax   = fig.add_axes([0.70, 0.02, 0.13, 0.05])
+# --- RECENTERED BUTTONS ---
+    # Coordinates: [left, bottom, width, height]
+    # Centering around 0.5 (middle of figure)
+    btn_width = 0.12
+    btn_height = 0.05
+    btn_bottom = 0.03 # Distance from the very bottom of the window
+    
+    back15_ax = fig.add_axes([0.30, btn_bottom, btn_width, btn_height])
+    pause_ax  = fig.add_axes([0.44, btn_bottom, btn_width, btn_height])
+    ff15_ax   = fig.add_axes([0.58, btn_bottom, btn_width, btn_height])
 
     pause_btn  = Button(pause_ax,  'Pause')
-    back5_btn  = Button(back5_ax,  '◀◀ -5')
-    ff15_btn   = Button(ff15_ax,   '+15 ▶▶')
-    back15_btn = Button(back15_ax, '◀◀ -15')
-    ff30_btn   = Button(ff30_ax,   '+30 ▶▶')
+    ff15_btn   = Button(ff15_ax,   '▶▶ +1')
+    back15_btn = Button(back15_ax, '◀◀ -1')
 
+    # ... [Button callback logic (toggle, make_jump) - Keep as is] ...
     def toggle(_event):
         state['paused'] = not state['paused']
         if state['paused']:
@@ -282,11 +300,9 @@ def animate_frames(
         return _jump
 
     pause_btn.on_clicked(toggle)
-    back5_btn.on_clicked(make_jump(-5))
-    ff15_btn.on_clicked(make_jump(15))
-    back15_btn.on_clicked(make_jump(-15))
-    ff30_btn.on_clicked(make_jump(30))
-
+    ff15_btn.on_clicked(make_jump(1))
+    back15_btn.on_clicked(make_jump(-1))
+    
     # Initialise with a white canvas; origin='upper' puts row 0 (y=0) at top
     # If coloring by polarity or by id we need an RGB canvas, otherwise single channel
     if (color_by_polarity and p_vals is not None) or (color_by_id and id_vals is not None):
@@ -359,10 +375,10 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'E_out.parquet'
+    FILE = 'E_patch.parquet'
  
     # 3-D scatter of a random subset
-    plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="pol")
+    #plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="pol")
 
     # Animated frames
-    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=False, id_col="pol")
+    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=True, id_col="pol",exclude_ids=[1,3])

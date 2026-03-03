@@ -234,10 +234,10 @@ def animate_frames(
     ff30_ax   = fig.add_axes([0.70, 0.02, 0.13, 0.05])
 
     pause_btn  = Button(pause_ax,  'Pause')
-    back5_btn  = Button(back5_ax,  '◀◀ -5')
-    ff15_btn   = Button(ff15_ax,   '+15 ▶▶')
-    back15_btn = Button(back15_ax, '◀◀ -15')
-    ff30_btn   = Button(ff30_ax,   '+30 ▶▶')
+    back5_btn  = Button(back5_ax,  '◀◀ -40')
+    ff15_btn   = Button(ff15_ax,   '◀◀ -10')
+    back15_btn = Button(back15_ax, '+10 ▶▶')
+    ff30_btn   = Button(ff30_ax,   '+40 ▶▶')
 
     def toggle(_event):
         state['paused'] = not state['paused']
@@ -257,10 +257,10 @@ def animate_frames(
         return _jump
 
     pause_btn.on_clicked(toggle)
-    back5_btn.on_clicked(make_jump(-5))
-    ff15_btn.on_clicked(make_jump(15))
-    back15_btn.on_clicked(make_jump(-15))
-    ff30_btn.on_clicked(make_jump(30))
+    back5_btn.on_clicked(make_jump(-40))
+    ff15_btn.on_clicked(make_jump(-10))
+    back15_btn.on_clicked(make_jump(10))
+    ff30_btn.on_clicked(make_jump(40))
 
     # Initialise with a white canvas; origin='upper' puts row 0 (y=0) at top
     # If coloring by polarity or by id we need an RGB canvas, otherwise single channel
@@ -334,10 +334,10 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/val_day_014_td_stdbscan.parquet'
+    FILE = 'data/val_day_014_td_dstream.parquet'
  
     # 3-D scatter of a random subset
-    plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")
+    #plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster")
 
     # Animated frames
-    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=True, id_col="cluster")
+    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=True, id_col="cluster_id")

@@ -26,7 +26,7 @@ class DStreamEventClusterer:
         # Optional tuning knobs (also put in __init__ if you want)
         self.min_cluster_cells = 1     # minimum number of cells for a valid cluster (can help filter noise)
         self.min_overlap_cells = 1      # absolute overlap needed to reuse an ID
-        self.min_overlap_frac = 0.5     # OR overlap fraction of new component area
+        self.min_overlap_frac = 0.2     # OR overlap fraction of new component area
         self.max_inactive_time_us = 200000  # prune IDs not seen for this long
 
         # Calculate grid dimensions
@@ -256,7 +256,7 @@ class DStreamEventClusterer:
 df = pd.read_parquet('data/val_day_014_td.parquet')
 
 # Initialize the clusterer (adjust sensor dimensions to match your camera, e.g., Prophesee, Davis)
-clusterer = DStreamEventClusterer(sensor_width=1280, sensor_height=720, grid_size=4, tau_us=40000, dense_threshold=50, update_interval_us=3000, medium_density_threshold=5)
+clusterer = DStreamEventClusterer(sensor_width=1280, sensor_height=720, grid_size=4, tau_us=40000, dense_threshold=30, update_interval_us=3000, medium_density_threshold=5)
 print("Starting clustering process...")
 # Run the clustering
 df['cluster_id'] = clusterer.process_dataframe(df)

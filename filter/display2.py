@@ -278,8 +278,8 @@ def animate_frames(
     ff15_ax   = fig.add_axes([0.58, btn_bottom, btn_width, btn_height])
 
     pause_btn  = Button(pause_ax,  'Pause')
-    ff15_btn   = Button(ff15_ax,   '▶▶ +1')
-    back15_btn = Button(back15_ax, '◀◀ -1')
+    ff15_btn   = Button(ff15_ax,   '▶▶ +20')
+    back15_btn = Button(back15_ax, '◀◀ -20')
 
     # ... [Button callback logic (toggle, make_jump) - Keep as is] ...
     def toggle(_event):
@@ -300,8 +300,8 @@ def animate_frames(
         return _jump
 
     pause_btn.on_clicked(toggle)
-    ff15_btn.on_clicked(make_jump(1))
-    back15_btn.on_clicked(make_jump(-1))
+    ff15_btn.on_clicked(make_jump(20))
+    back15_btn.on_clicked(make_jump(-20))
     
     # Initialise with a white canvas; origin='upper' puts row 0 (y=0) at top
     # If coloring by polarity or by id we need an RGB canvas, otherwise single channel
@@ -375,10 +375,10 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'E_patch.parquet'
+    FILE = 'data/E_patch_dstream.parquet'
  
     # 3-D scatter of a random subset
-    #plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="pol")
+    plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster_id")
 
     # Animated frames
-    animate_frames(FILE, dt=100_000, max_frames=1892, color_by_id=True, id_col="pol",exclude_ids=[1,3])
+    animate_frames(FILE, dt=50_000, max_frames=1892, color_by_id=True, id_col="cluster_id",exclude_ids=[])

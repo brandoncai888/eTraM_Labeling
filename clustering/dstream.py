@@ -21,6 +21,7 @@ class DStreamEventClusterer:
         
         self.next_cluster_id = 1
         self.id_last_seen = {}          # persistent_id -> last_seen_t
+        self.id_first_seen = {}         # persistent_id -> first_seen_t 
         self.id_active = set()          # currently active persistent IDs (optional convenience)
 
         # Optional tuning knobs (also put in __init__ if you want)
@@ -76,7 +77,9 @@ class DStreamEventClusterer:
             # If the cell is sufficiently dense, give the event the cell's current cluster ID
             if self.density_grid[gy, gx] >= self.medium_density_threshold:
                 assigned_ids[i] = self.cluster_grid[gy, gx]
-                if assigned_ids[i] == 0:
+                if assigned_ids[i] <= 0:
+                    assigned_ids[i] = -1
+                elif t - self.id_first_seen[assigned_ids[i]] < 100000:
                     assigned_ids[i] = -1
             # (If not dense enough, it remains -1, which acts as 'noise')
 
@@ -231,6 +234,8 @@ class DStreamEventClusterer:
 
             # update bookkeeping
             self.id_last_seen[pid] = current_t
+            if pid not in self.id_active:
+                self.id_first_seen[pid] = current_t
             self.id_active.add(pid)
 
         # --- 7) Retire IDs that disappeared (optional immediate retire) ---

@@ -1,24 +1,14 @@
 import time
 from collections import deque
-from matplotlib.patches import FancyArrowPatch
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.widgets import Button
+from matplotlib.patches import FancyArrowPatch
+import open3d as o3d
 
 from extract import extract
-
-import open3d as o3d
-import numpy as np
-import pandas as pd
-
-import open3d as o3d
-import numpy as np
-import pandas as pd
-
-import open3d as o3d
-import numpy as np
-import pandas as pd
 
 def plot_3d_open3d(
     source,
@@ -59,10 +49,9 @@ def plot_3d_open3d(
     # 4. Extract coordinates
     points = np.zeros((len(df), 3))
     points[:, 0] = df[x_col].values
-    points[:, 1] = df[t_col].values/1000.0  # Scale time for better visualization
+    points[:, 1] = df[t_col].values / 1000.0  # Scale time for better visualization
 
     # Use display height to invert image Y such that displayed Z = (height - y).
-    # Prefer a `height` column in the dataframe; otherwise default to 720.
     if 'height' in df.columns:
         display_height = int(df['height'].iloc[0])
     else:
@@ -96,9 +85,8 @@ def plot_3d_open3d(
         if -1 in unique_ids:
             palette[np.searchsorted(unique_ids, -1)] = [0.0, 0.0, 0.0]
 
-        # Map IDs to their corresponding color in the palette
         id_to_idx = {uid: i for i, uid in enumerate(unique_ids)}
-        # Apply explicit mappings when the ID exists in the data
+        
         for uid, col in id_color_map.items():
             if uid in id_to_idx:
                 palette[id_to_idx[uid]] = col
@@ -114,8 +102,6 @@ def plot_3d_open3d(
         colors[:] = [0.1, 0.1, 0.1] # Dark Grey default
 
     pcd.colors = o3d.utility.Vector3dVector(colors)
-
-    # 6. No additional coordinate flip needed; Z already set to (height - y)
 
     # 7. Visualization
     vis = o3d.visualization.Visualizer()
@@ -145,6 +131,9 @@ def plot_3d_open3d(
 
 def animate_frames(
     source,
+    velocities_source: str = None,
+    velocity_method: str = 'decay_votes',
+    velocity_scale: float = 20.0,
     x_col: str = 'x',
     y_col: str = 'y',
     t_col: str = 't',
@@ -162,37 +151,10 @@ def animate_frames(
     fps: int = 20,
     max_frames: int = None,
     exclude_ids: list = None,
-    id_pol_arrows: bool = True,
+    show_velocity_arrows: bool = True,
 ):
     """
-    Animate event camera data as a sequence of frames.
-
-    Each frame accumulates all events within a `dt`-wide time window into a
-    numpy image array and renders it with imshow. Render time is proportional
-    to the sensor resolution, not the number of events.
-
-    Args:
-        source:             Path to an event file, or a DataFrame already loaded.
-        x_col:              Column name for x.
-        y_col:              Column name for y.
-        t_col:              Column name for timestamp.
-        p_col:              Column name for polarity.
-        h5_key:             HDF5 group key for .h5 files.
-        dt:                 Time window per frame in the same units as t.
-        width:              Sensor width in pixels. Auto-detected from data if None.
-        height:             Sensor height in pixels. Auto-detected from data if None.
-        color_by_polarity:  If True, ON events are blue and OFF events are red.
-                            If False, all events are black dots on white.
-        interval:           Delay between frames in milliseconds (for display).
-        figsize:            Figure size in inches.
-        save_path:          Save animation to this path (.gif or .mp4).
-                            Requires pillow (gif) or ffmpeg (mp4).
-        fps:                Frames per second when saving.
-        max_frames:         Cap the total number of frames rendered. None = all.
-        exclude_ids:        List of integer IDs to exclude from animation. None = show all.
-
-    Returns:
-        matplotlib.animation.FuncAnimation object.
+    Animate event camera data as a sequence of frames, with pre-computed velocities.
     """
     df = extract(source, h5_key) if isinstance(source, str) else source
     df = df.sort_values(t_col).reset_index(drop=True)
@@ -203,6 +165,20 @@ def animate_frames(
     p_vals = df[p_col].to_numpy() if p_col in df.columns else None
     id_vals = df[id_col].to_numpy() if id_col in df.columns else None
 
+    # Load and pre-process velocities into a fast dictionary format
+    vel_dict = None
+    if show_velocity_arrows and velocities_source is not None:
+        print(f"Loading velocities from {velocities_source}...")
+        df_vel = pd.read_parquet(velocities_source)
+        vel_dict = {}
+        # Group by cluster ID for fast lookup later
+        cluster_col = 'cluster_id' if 'cluster_id' in df_vel.columns else 'cluster'
+        for cid, group in df_vel.groupby(cluster_col):
+            t_arr = group['t'].values
+            # Extract the [vx, vy] lists into a 2D numpy array
+            v_arr = np.stack(group[velocity_method].values)
+            vel_dict[cid] = (t_arr, v_arr)
+
     # Filter out excluded IDs
     if exclude_ids is not None and id_vals is not None:
         mask = ~np.isin(id_vals, exclude_ids)
@@ -212,20 +188,16 @@ def animate_frames(
         p_vals = p_vals[mask] if p_vals is not None else None
         id_vals = id_vals[mask]
 
-    # Pre-compute deterministic palette mapping for IDs if requested
+    # Pre-compute deterministic palette mapping
     if color_by_id and id_vals is not None:
         unique_ids = np.unique(id_vals)
         rng = np.random.default_rng(seed=42)
         palette = rng.random((len(unique_ids), 3))
 
-       
-
-        # Noise events (id == -1) are always black
         if -1 in unique_ids:
             palette[np.searchsorted(unique_ids, -1)] = [0.0, 0.0, 0.0]
 
         id_to_idx = {uid: i for i, uid in enumerate(unique_ids)}
-
         indices_all = np.array([id_to_idx[uid] for uid in id_vals])
 
     if width is None:
@@ -238,7 +210,6 @@ def animate_frames(
     if max_frames is not None:
         n_frames = min(n_frames, max_frames)
 
-    # Pre-compute frame boundaries once
     left_indices  = np.searchsorted(t_vals, boundaries[:n_frames],      side='left')
     right_indices = np.searchsorted(t_vals, boundaries[1:n_frames + 1], side='left')
 
@@ -258,12 +229,10 @@ def animate_frames(
             yield state['frame']
             if not state['paused']:
                 state['frame'] = (state['frame'] + 1) % n_frames
-    # --- RECENTERED BUTTONS ---
-    # Coordinates: [left, bottom, width, height]
-    # Centering around 0.5 (middle of figure)
+
     btn_width = 0.12
     btn_height = 0.05
-    btn_bottom = 0.03 # Distance from the very bottom of the window
+    btn_bottom = 0.03 
     
     back15_ax = fig.add_axes([0.30, btn_bottom, btn_width, btn_height])
     pause_ax  = fig.add_axes([0.44, btn_bottom, btn_width, btn_height])
@@ -273,7 +242,6 @@ def animate_frames(
     ff15_btn   = Button(ff15_ax,   '▶▶ +20')
     back15_btn = Button(back15_ax, '◀◀ -20')
 
-    # ... [Button callback logic (toggle, make_jump) - Keep as is] ...
     def toggle(_event):
         state['paused'] = not state['paused']
         if state['paused']:
@@ -295,21 +263,17 @@ def animate_frames(
     ff15_btn.on_clicked(make_jump(20))
     back15_btn.on_clicked(make_jump(-20))
     
-    # Initialise with a white canvas; origin='upper' puts row 0 (y=0) at top
-    # If coloring by polarity or by id we need an RGB canvas, otherwise single channel
     if (color_by_polarity and p_vals is not None) or (color_by_id and id_vals is not None):
         init_img = np.ones((height, width, 3), dtype=np.float32)
     else:
         init_img = np.ones((height, width), dtype=np.float32)
 
-    im    = ax.imshow(init_img, cmap='gray_r', vmin=0, vmax=1, origin='upper',
-                      interpolation='nearest')
+    im = ax.imshow(init_img, cmap='gray_r', vmin=0, vmax=1, origin='upper', interpolation='nearest')
     
     MAX_ARROWS = 100
     arrow_pool = []
     for _ in range(MAX_ARROWS):
-        a = FancyArrowPatch((0,0),(0,0), arrowstyle='->',
-                            mutation_scale=10, linewidth=0.5, color='black')
+        a = FancyArrowPatch((0,0),(0,0), arrowstyle='->', mutation_scale=15, linewidth=1.5, color='black')
         a.set_visible(False)
         ax.add_patch(a)
         arrow_pool.append(a)
@@ -329,6 +293,7 @@ def animate_frames(
 
         lo = left_indices[frame_idx]
         hi = right_indices[frame_idx]
+        current_t = boundaries[frame_idx]
 
         xs = x_vals[lo:hi]
         ys = y_vals[lo:hi]
@@ -337,37 +302,39 @@ def animate_frames(
 
         for a in arrow_pool:
             a.set_visible(False)
-        if id_pol_arrows and ids is not None and ps is not None:
-            N = np.unique(ids).size
+            
+        # Draw Arrows using pre-computed velocities
+        if show_velocity_arrows and ids is not None and vel_dict is not None:
             ids_unique = np.unique(ids)
-            for i in range(N):
-                if ids_unique[i] == -1: # skip noise events
+            for i, cid in enumerate(ids_unique):
+                if cid == -1 or i >= MAX_ARROWS: # skip noise and overflow
                     continue
-                xs_i = xs[ids == ids_unique[i]]
-                ys_i = ys[ids == ids_unique[i]]
-                ps_i = ps[ids == ids_unique[i]] 
-                #total = len(xs_i)
-                u,v=0,0
-                for j in range(4):
-                    frac = np.sum(ps_i == j) #/total if total > 0 else 0
-                    if j == 0:
-                        v += frac
-                    elif j == 1:
-                        u += frac
-                    elif j == 2:
-                        v -= frac
-                    elif j == 3:
-                        u -= frac
-
+                    
+                xs_i = xs[ids == cid]
+                ys_i = ys[ids == cid]
+                
+                # Center of Mass for arrow start
                 xs_i_mean = xs_i.mean() 
                 ys_i_mean = ys_i.mean()
-                arrow_pool[i].set_positions((xs_i_mean, ys_i_mean), (xs_i_mean + u/10, ys_i_mean + v/10))
-                arrow_pool[i].set_color(palette[id_to_idx[ids_unique[i]]]*0.7 if color_by_id and id_vals is not None else 'black')
+                
+                u, v = 0.0, 0.0
+                
+                # Nearest neighbor lookup for velocity at current_t
+                if cid in vel_dict:
+                    t_arr, v_arr = vel_dict[cid]
+                    idx = np.abs(t_arr - current_t).argmin()
+                    v_vec = v_arr[idx]
+                    
+                    if len(v_vec) == 2 and not np.isnan(v_vec[0]) and not np.isnan(v_vec[1]):
+                        u = v_vec[0] * velocity_scale
+                        v = v_vec[1] * velocity_scale
+
+                arrow_pool[i].set_positions((xs_i_mean, ys_i_mean), (xs_i_mean + u, ys_i_mean + v))
+                arrow_color = 'black'#palette[id_to_idx[cid]] * 0.7 if (color_by_id and id_vals is not None) else 'black'
+                arrow_pool[i].set_color(arrow_color)
                 arrow_pool[i].set_visible(True)
 
-
-
-        # Color by ID (deterministic palette) takes precedence when requested
+        # Drawing the image logic
         if 'id_vals' in locals() and color_by_id and id_vals is not None:
             img = np.ones((height, width, 3), dtype=np.float32)   # white
             ids_idx = indices_all[lo:hi]
@@ -375,35 +342,30 @@ def animate_frames(
                 img[ys, xs] = palette[ids_idx]
 
         elif color_by_polarity and p_vals is not None:
-
-
-             # Explicit color mapping for specific IDs
+             # Explicit color mapping
             id_color_map = {
                 0: [1.0, 0.0, 0.0],    # red
                 1: [0.0, 0.3, 1.0],    # blue
                 2: [0.0, 1.0, 0.3],    # green
                 3: [0.9, 0.9, 0.0],    # yellow
             }
-
-
             img = np.ones((height, width, 3), dtype=np.float32)   # white
             ps  = p_vals[lo:hi]
             for uid, col in id_color_map.items():
-                on  = ps == uid
-                img[ys[on],  xs[on]]  = col # Apply explicit color mapping for polarity
+                on = ps == uid
+                img[ys[on],  xs[on]]  = col 
         else:
             img = np.zeros((height, width), dtype=np.uint8)
             np.add.at(img, (ys, xs), 1)
-            img = np.clip(img, 0, 1)                       # binary: any event → black
+            img = np.clip(img, 0, 1)  # binary: any event -> black
 
         im.set_data(img)
         title.set_text(
             f'Frame {frame_idx + 1}/{n_frames}   '
-            f't = [{boundaries[frame_idx]:,.0f} – {boundaries[frame_idx + 1]:,.0f}] µs   '
-            f'events: {hi - lo:,}   FPS: {live_fps:.1f}'
+            f't = [{current_t:,.0f} - {boundaries[frame_idx + 1]:,.0f}] µs   '
+            f'events: {hi - lo:,}   FPS: {live_fps:.1f} = {live_fps * dt/1_000_000:.2f} simulated seconds/second'
         )
         return (im, title, *arrow_pool)
-
 
     ani = animation.FuncAnimation(
         fig, update, frames=frame_gen(), interval=interval, blit=True,
@@ -422,10 +384,21 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/E_patch_dstream.parquet'
-
-    # 3-D scatter of a random subset
-    #plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster_id")
+    EVENT_FILE = 'data/E_patch_dstream.parquet'
+    VELOCITY_FILE = 'data/E_patch_velocity.parquet'  # Change to your actual velocity file name
 
     # Animated frames
-    animate_frames(FILE, dt=50_000, max_frames=1892, color_by_id=True, id_col="cluster",exclude_ids=[],p_col="pol",color_by_polarity=False, id_pol_arrows=True)
+    animate_frames(
+        source=EVENT_FILE, 
+        velocities_source=VELOCITY_FILE,     # New Argument
+        velocity_method='decay_votes',       # New Argument (choose 'limit', 'momentum', 'votes', or 'decay_votes')
+        velocity_scale=1_000_000.0,                 # New Argument (tweak to make arrows longer/shorter)
+        dt=100_000, 
+        max_frames=1892, 
+        color_by_id=True, 
+        id_col="cluster",
+        exclude_ids=[],
+        p_col="pol",
+        color_by_polarity=False, 
+        show_velocity_arrows=True            # Renamed from id_pol_arrows
+    )

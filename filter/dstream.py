@@ -265,9 +265,9 @@ df = pd.read_parquet('data/E_patch.parquet')
 clusterer = DStreamEventClusterer(sensor_width=320, sensor_height=180, grid_size=4, tau_us=50000, dense_threshold=20, update_interval_us=3000, medium_density_threshold=10, verify_time_us=10000)
 print("Starting clustering process...")
 # Run the clustering
-df['cluster_id'] = clusterer.process_dataframe(df)
+df['cluster'] = clusterer.process_dataframe(df)
 print("Clustering completed.")
 df.to_parquet('data/E_patch_dstream.parquet')  # Save the results for later analysis
 # View the events that were actually assigned to a cluster (filtering out noise)
-clustered_events = df[df['cluster_id'] != -1]
+clustered_events = df[df['cluster'] != -1]
 print(clustered_events.head())

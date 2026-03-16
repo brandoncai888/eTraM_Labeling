@@ -78,5 +78,5 @@ def evaluate_results(df):
     print("="*50 + "\n")
 if __name__ == "__main__":
     print("Loading saved velocities for evaluation...")
-    saved_df = pd.read_parquet("data/E_patch_dstream_2x2_velocity.parquet")
+    saved_df = pd.read_parquet("data/E_patch_dstream_velocity.parquet")
     evaluate_results(saved_df)

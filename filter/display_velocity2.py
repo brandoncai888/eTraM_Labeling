@@ -384,15 +384,15 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    EVENT_FILE = 'data/E_patch_dstream_2x2.parquet'
-    VELOCITY_FILE = 'data/E_patch_dstream_2x2_velocity.parquet' 
+    EVENT_FILE = 'data/E_patch_stdbscan.parquet'
+    VELOCITY_FILE = 'data/E_patch_stdbscan_velocity.parquet' 
     # Animated frames
     animate_frames(
         source=EVENT_FILE, 
         velocities_source=VELOCITY_FILE,    
         velocity_method='decay_votes',    # choose 'limit', 'momentum', 'votes', or 'decay_votes'
         velocity_scale=100.0,                 
-        dt=100_000, 
+        dt=250_000, 
         max_frames=1892, 
         color_by_id=True, 
         id_col="cluster",

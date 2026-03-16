@@ -115,7 +115,7 @@ def calc_directional_votes(df, delta_t, t_grid, cluster_id):
     velocities = []
     
     for T in t_grid:
-        mask = (times >= T) & (times < T + delta_t)
+        mask = (times >= T - delta_t) & (times < T)
         pols_window = pols[mask]
         N = len(pols_window)
         
@@ -265,4 +265,4 @@ if __name__ == "__main__":
     # OPTION 2: Hardcoded execution
     # ---------------------------------------------------------
     # Uncomment the line below to run directly from IDE without CLI arguments
-    estimate_velocities("data/E_patch_stdbscan.parquet", "data/E_patch_stdbscan_velocity.parquet", method="all", delta_t=100_000)
+    estimate_velocities("data/E_patch_dstream.parquet", "data/E_patch_dstream_velocity.parquet", method="all", delta_t=250_000)

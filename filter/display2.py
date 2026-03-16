@@ -375,10 +375,10 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    FILE = 'data/E_patch_dstream.parquet'
+    FILE = 'data/E_patch_dstream_2x2.parquet'
 
     # 3-D scatter of a random subset
     #plot_3d_open3d(FILE, max_points=42240827, t_start=0, t_end=63037503, color_by_id=True, id_col="cluster_id")
 
     # Animated frames
-    animate_frames(FILE, dt=50_000, max_frames=1892, color_by_id=True, id_col="cluster_id",exclude_ids=[])
+    animate_frames(FILE, dt=50_000, max_frames=1892, color_by_id=True, id_col="cluster",exclude_ids=[])

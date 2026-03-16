@@ -466,12 +466,12 @@ if __name__ == "__main__":
 
     clustered = cluster_events_stdbscan(
         df,
-        eps_spatial=2.3,        # pixels
+        eps_spatial=2.9,        # pixels
         eps_temporal=25000.0,   # µs  (adjust to match your timestamp unit)
         min_pts=40,
         use_gpu=True,
-        chunk_size=7_000_000,     # prevent cuML int32 overflow on large datasets
-        overlap=60_000,         # some events shared between windows to stitch clusters
+        chunk_size=2_300_000,     # prevent cuML int32 overflow on large datasets
+        overlap=100_000,         # some events shared between windows to stitch clusters
         min_overlap_frac=0.2,   # require substantial overlap for stitching
         max_centroid_dist=100.0, # only stitch if centroids are close
     )

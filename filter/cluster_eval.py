@@ -97,4 +97,4 @@ if __name__ == "__main__":
     # Uncomment the line below to run without command line arguments.
     # Replace the file paths and method with your actual values.
     #
-    evaluate_clusters("data/E_patch_stdbscan.parquet", "data/E_patch_dstream.parquet", method="all")
+    evaluate_clusters("data/E_patch_stdbscan.parquet", "data/E_patch_dstream_2x2.parquet", method="all")

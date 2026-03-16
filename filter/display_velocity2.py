@@ -384,15 +384,14 @@ def animate_frames(
 
 
 if __name__ == '__main__':
-    EVENT_FILE = 'data/E_patch_dstream.parquet'
-    VELOCITY_FILE = 'data/E_patch_velocity.parquet'  # Change to your actual velocity file name
-
+    EVENT_FILE = 'data/E_patch_dstream_2x2.parquet'
+    VELOCITY_FILE = 'data/E_patch_dstream_2x2_velocity.parquet' 
     # Animated frames
     animate_frames(
         source=EVENT_FILE, 
-        velocities_source=VELOCITY_FILE,     # New Argument
-        velocity_method='decay_votes',       # New Argument (choose 'limit', 'momentum', 'votes', or 'decay_votes')
-        velocity_scale=1_000_000.0,                 # New Argument (tweak to make arrows longer/shorter)
+        velocities_source=VELOCITY_FILE,    
+        velocity_method='decay_votes',    # choose 'limit', 'momentum', 'votes', or 'decay_votes'
+        velocity_scale=100.0,                 
         dt=100_000, 
         max_frames=1892, 
         color_by_id=True, 

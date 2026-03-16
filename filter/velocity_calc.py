@@ -129,7 +129,7 @@ def calc_directional_votes(df, delta_t, t_grid, cluster_id):
         vy = (pol_counts[0] - pol_counts[2]) / N
         velocities.append([vx, vy])
         
-    return velocities
+    return velocities 
 
 def calc_decay_votes(df, delta_t, t_grid, cluster_id):
     """
@@ -181,7 +181,7 @@ def calc_decay_votes(df, delta_t, t_grid, cluster_id):
         else:
             velocities.append(v_history[valid_idx[-1]].tolist())
             
-    return velocities
+    return velocities 
 
 def estimate_velocities(input_file, output_file, method='all', delta_t=1000):
     print(f"Loading {input_file}...")
@@ -210,7 +210,7 @@ def estimate_velocities(input_file, output_file, method='all', delta_t=1000):
         t_min = cluster_df['t'].min()
         t_max = cluster_df['t'].max()
         # Align grid to delta_t boundaries if desired, or just start at t_min
-        t_grid = np.arange(t_min, t_max + delta_t, delta_t) 
+        t_grid = np.arange(t_min+delta_t, t_max, delta_t)
         
         res_df = pd.DataFrame({'t': t_grid, 'cluster_id': cluster_id})
         
@@ -265,4 +265,4 @@ if __name__ == "__main__":
     # OPTION 2: Hardcoded execution
     # ---------------------------------------------------------
     # Uncomment the line below to run directly from IDE without CLI arguments
-    estimate_velocities("data/E_patch_dstream.parquet", "data/E_patch_velocity.parquet", method="all", delta_t=100_000)
+    estimate_velocities("data/E_patch_stdbscan.parquet", "data/E_patch_stdbscan_velocity.parquet", method="all", delta_t=100_000)

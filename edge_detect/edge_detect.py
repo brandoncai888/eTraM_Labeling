@@ -33,7 +33,7 @@ def edge_detect(df_name, width, height, voxel, x_min, x_max, k, window_length):
     avg = window_length/pix
     std_dev = sqrt(window_length*(pix-1)/pix/pix)
     dense_threshold = avg + 5 * std_dev
-    undense_threshold = avg - 1 * std_dev
+    undense_threshold = avg - 2 * std_dev
 
     x_max = x_min + width*voxel
     y_max = y_min + height*voxel
@@ -88,14 +88,15 @@ def edge_detect(df_name, width, height, voxel, x_min, x_max, k, window_length):
     
 
 if __name__ == "__main__":
-    k = 4
+    k = 5
 
     df_name = f"data/E_patch{k}.parquet"
     width = 1280//k
     height = 720//k
 
-    voxel = 4
+    voxel = 2
     x_min = 0
     y_min = 0
-    window_length = 30_000
+    window_length = 10_000
     edge_detect(df_name,width//voxel,height//voxel,voxel,x_min,y_min,k,window_length)
+    

@@ -68,8 +68,8 @@ def animate_dual_frames(
     rng = np.random.default_rng(seed=42)
     lo_palette = rng.random((3, 3))
     # Hardcode a few states if you prefer:
-    lo_palette[0] = [0.7, 0.7, 0.7] # State 0: On (Gray)
-    lo_palette[1] = [0.2, 0.2, 0.2] # State 1: Edge (Black)
+    lo_palette[0] = [0.75, 0.75, 0.75] # State 0: On (Gray)
+    lo_palette[1] = [0.1, 0.1, 0.1] # State 1: Edge (Black)
     lo_palette[2] = [1.0, 1.0, 1.0] # State -1: Off (White)
 
     # 3. Setup Plot Boundaries
@@ -257,7 +257,7 @@ def animate_dual_frames(
 
 if __name__ == '__main__':
     k = 5
-    voxel = 4
+    voxel = 2
     FILE_HI = f'data/E_patch{k}-{voxel}_cropped.parquet'
     FILE_LO = f'data/E_patch{k}-{voxel}_states.parquet'
     animate_dual_frames(FILE_HI, FILE_LO, t_col='index',p_col='pol', offset_x=0, offset_y=0, window_length=20_000, scale_factor=voxel, alpha=0.05)
